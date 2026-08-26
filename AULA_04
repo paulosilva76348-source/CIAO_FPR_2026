@@ -1,0 +1,1041 @@
+# Exercícios de Otimização — Algoritmos e SD-WAN
+
+Este documento apresenta quatro exercícios relacionados a **algoritmos de otimização**, abordando elitismo, penalização por SLA, balanceamento de carga e decisioning SD-WAN com princípios Zero-Trust.
+
+---
+
+## Exercício 1 — Análise do Elitismo na Estabilidade Algorítmica
+
+### Objetivo
+
+Comparar o comportamento do algoritmo com:
+
+```python
+USAR_ELITISMO = True
+```
+
+e:
+
+```python
+USAR_ELITISMO = False
+```
+
+### Código completo
+
+```python
+import numpy as np
+
+
+def calcular_custo(rota, matriz):
+    dist = 0
+
+    for i in range(len(rota) - 1):
+        dist += matriz[rota[i], rota[i + 1]]
+
+    return dist + matriz[rota[-1], rota[0]]
+
+
+# True = mantém o melhor indivíduo
+# False = não mantém o melhor indivíduo
+USAR_ELITISMO = True
+
+NUM_NOS = 8
+
+matriz_teste = np.random.uniform(
+    10, 100, (NUM_NOS, NUM_NOS)
+)
+
+TAM_POP = 40
+GERACOES = 80
+
+populacao = [
+    np.random.permutation(NUM_NOS)
+    for _ in range(TAM_POP)
+]
+
+historico_melhor = []
+
+
+for g in range(GERACOES):
+
+    custos = [
+        calcular_custo(ind, matriz_teste)
+        for ind in populacao
+    ]
+
+    melhor_idx = np.argmin(custos)
+    historico_melhor.append(custos[melhor_idx])
+
+    novos = []
+
+    # Elitismo: copia o melhor indivíduo
+    # diretamente para a próxima geração.
+    if USAR_ELITISMO:
+        novos.append(
+            populacao[melhor_idx].copy()
+        )
+
+    while len(novos) < TAM_POP:
+
+        i1, i2 = np.random.choice(
+            TAM_POP, 2, replace=False
+        )
+
+        pai = (
+            populacao[i1]
+            if custos[i1] < custos[i2]
+            else populacao[i2]
+        )
+
+        filho = pai.copy()
+
+        # Mutação por troca
+        if np.random.rand() < 0.3:
+
+            idx1, idx2 = np.random.choice(
+                NUM_NOS, 2, replace=False
+            )
+
+            filho[idx1], filho[idx2] = (
+                filho[idx2],
+                filho[idx1]
+            )
+
+        novos.append(filho)
+
+    populacao = novos
+
+
+custos_finais = [
+    calcular_custo(ind, matriz_teste)
+    for ind in populacao
+]
+
+print(
+    f"[Exercício 1] Menor Custo Obtido "
+    f"(Elitismo={USAR_ELITISMO}): "
+    f"{min(custos_finais):.2f}"
+)
+```
+
+### Análise conceitual
+
+Com `USAR_ELITISMO = True`, o melhor indivíduo de cada geração é copiado diretamente para a geração seguinte.
+
+Isso impede que a melhor solução seja perdida devido à mutação ou à seleção.
+
+Com:
+
+```python
+USAR_ELITISMO = False
+```
+
+o melhor indivíduo não é preservado obrigatoriamente. Dessa forma, uma solução muito boa pode ser modificada ou desaparecer na geração seguinte.
+
+### Conclusão
+
+O elitismo normalmente produz uma curva de convergência mais estável e tende a garantir que o melhor custo encontrado **não piore entre gerações**.
+
+Sem elitismo, existe maior possibilidade de ocorrerem oscilações e perda temporária da melhor solução.
+
+---
+
+# Exercício 2 — Penalidades por Descumprimento de SLA
+
+## Objetivo
+
+Neste exercício, cada enlace cuja latência seja superior a **50 ms** recebe uma penalidade adicional de **1000 ms**.
+
+### Código completo
+
+```python
+import numpy as np
+
+np.random.seed(15)
+
+matriz_latencia = np.random.uniform(
+    5, 80, (6, 6)
+)
+
+
+def calcular_custo_com_sla(
+    rota,
+    matriz,
+    limite_sla=50.0
+):
+
+    custo_total = 0.0
+    penalidade = 0.0
+
+    for i in range(len(rota) - 1):
+
+        latencia_enlace = matriz[
+            rota[i],
+            rota[i + 1]
+        ]
+
+        custo_total += latencia_enlace
+
+        # Penalização para violação do SLA
+        if latencia_enlace > limite_sla:
+            penalidade += 1000.0
+
+    return custo_total + penalidade
+
+
+rota_teste = np.array(
+    [0, 1, 2, 3, 4, 5]
+)
+
+custo_final = calcular_custo_com_sla(
+    rota_teste,
+    matriz_latencia
+)
+
+print(
+    f"[Exercício 2] Custo Total "
+    f"(Com Penalizações de SLA): "
+    f"{custo_final:.2f} ms"
+)
+```
+
+## O que o algoritmo faz?
+
+Para cada enlace da rota:
+
+```text
+0 → 1
+1 → 2
+2 → 3
+3 → 4
+4 → 5
+```
+
+o programa verifica a latência.
+
+Se:
+
+```python
+latencia_enlace > 50
+```
+
+é adicionada uma penalidade de:
+
+```python
+1000.0
+```
+
+Portanto:
+
+$$
+Custo\ Final =
+\sum Latências +
+1000 \times Número\ de\ Violações
+$$
+
+### Conclusão
+
+Essa estratégia faz com que rotas que ultrapassam o limite operacional sejam fortemente desestimuladas pelo algoritmo de otimização.
+
+Uma rota com baixa latência, mas que viola vários requisitos de SLA, pode apresentar um custo final muito maior que uma rota um pouco mais lenta, porém dentro dos limites operacionais.
+
+---
+
+# Exercício 3 — Balanceamento de Carga em Servidores
+
+## Objetivo
+
+O problema consiste em distribuir:
+
+* **20 tarefas**
+* entre **4 servidores**
+* minimizando o **Makespan**.
+
+Cada posição do indivíduo representa o servidor responsável por uma tarefa.
+
+Os servidores possíveis são:
+
+```text
+0, 1, 2, 3
+```
+
+## Conceito de Makespan
+
+O Makespan é a maior carga entre os servidores.
+
+Por exemplo:
+
+| Servidor | Carga |
+| -------- | ----: |
+| 0        | 100 s |
+| 1        | 120 s |
+| 2        |  95 s |
+| 3        | 110 s |
+
+Nesse caso:
+
+```text
+Makespan = 120 s
+```
+
+### Código completo
+
+```python
+import numpy as np
+
+
+# Tempos das 20 tarefas
+T = np.array([
+    12, 35, 40, 8, 15,
+    22, 19, 45, 60, 31,
+    14, 28, 50, 18, 25,
+    33, 42, 10, 5, 29
+])
+
+NUM_TAREFAS = len(T)
+NUM_SERVIDORES = 4
+
+TAM_POP = 50
+GERACOES = 200
+TAXA_MUTACAO = 0.20
+
+np.random.seed(2026)
+
+
+def calcular_cargas(individuo):
+    """
+    Calcula a carga total de cada servidor.
+    """
+
+    cargas = np.zeros(NUM_SERVIDORES)
+
+    for tarefa, servidor in enumerate(individuo):
+        cargas[servidor] += T[tarefa]
+
+    return cargas
+
+
+def calcular_makespan(individuo):
+    """
+    O Makespan é a maior carga entre os servidores.
+    """
+
+    cargas = calcular_cargas(individuo)
+
+    return np.max(cargas)
+
+
+def criar_individuo():
+    """
+    Cria uma solução aleatória.
+    Cada tarefa recebe um servidor entre 0 e 3.
+    """
+
+    return np.random.randint(
+        0,
+        NUM_SERVIDORES,
+        NUM_TAREFAS
+    )
+
+
+def selecionar_pai(populacao, custos):
+    """
+    Seleção por torneio.
+    """
+
+    i1, i2 = np.random.choice(
+        len(populacao),
+        2,
+        replace=False
+    )
+
+    if custos[i1] < custos[i2]:
+        return populacao[i1]
+    else:
+        return populacao[i2]
+
+
+def mutar(individuo):
+    """
+    Muda aleatoriamente o servidor de uma tarefa.
+    """
+
+    filho = individuo.copy()
+
+    if np.random.rand() < TAXA_MUTACAO:
+
+        posicao = np.random.randint(
+            NUM_TAREFAS
+        )
+
+        filho[posicao] = np.random.randint(
+            NUM_SERVIDORES
+        )
+
+    return filho
+
+
+# Criação da população inicial
+populacao = [
+    criar_individuo()
+    for _ in range(TAM_POP)
+]
+
+
+melhor_individuo = None
+melhor_makespan = float("inf")
+
+historico = []
+
+
+for geracao in range(GERACOES):
+
+    custos = [
+        calcular_makespan(ind)
+        for ind in populacao
+    ]
+
+    melhor_idx = np.argmin(custos)
+
+    # Atualiza o melhor global
+    if custos[melhor_idx] < melhor_makespan:
+
+        melhor_makespan = custos[melhor_idx]
+
+        melhor_individuo = (
+            populacao[melhor_idx].copy()
+        )
+
+    historico.append(melhor_makespan)
+
+    # Elitismo
+    novos = [
+        melhor_individuo.copy()
+    ]
+
+    while len(novos) < TAM_POP:
+
+        pai = selecionar_pai(
+            populacao,
+            custos
+        )
+
+        filho = mutar(pai)
+
+        novos.append(filho)
+
+    populacao = novos
+
+
+# Resultado final
+cargas_finais = calcular_cargas(
+    melhor_individuo
+)
+
+print("\n===== RESULTADO =====")
+
+print(
+    f"Makespan mínimo: "
+    f"{melhor_makespan:.2f} segundos"
+)
+
+print("\nDistribuição das tarefas:")
+
+for servidor in range(NUM_SERVIDORES):
+
+    tarefas = [
+        i
+        for i, s in enumerate(
+            melhor_individuo
+        )
+        if s == servidor
+    ]
+
+    print(
+        f"Servidor {servidor}: "
+        f"Tarefas {tarefas} | "
+        f"Carga = {cargas_finais[servidor]:.2f} s"
+    )
+
+print("\nVetor do melhor indivíduo:")
+
+print(melhor_individuo)
+```
+
+## Representação do indivíduo
+
+Um indivíduo pode ser representado, por exemplo, por:
+
+```text
+[0, 1, 2, 3, 0, 1, ...]
+```
+
+Isso significa:
+
+```text
+Tarefa 0 → servidor 0
+Tarefa 1 → servidor 1
+Tarefa 2 → servidor 2
+Tarefa 3 → servidor 3
+Tarefa 4 → servidor 0
+...
+```
+
+## Função objetivo
+
+A principal função utilizada é:
+
+```python
+def calcular_makespan(individuo):
+    cargas = calcular_cargas(individuo)
+    return np.max(cargas)
+```
+
+Como o objetivo é minimizar o Makespan, quanto menor o valor retornado, melhor a solução.
+
+## Limite teórico
+
+A soma de todas as tarefas é:
+
+```text
+541 segundos
+```
+
+Com quatro servidores, o limite teórico inferior é:
+
+$$
+\frac{541}{4} = 135,25\ s
+$$
+
+Portanto, nenhuma solução pode ter Makespan inferior a aproximadamente **135,25 segundos**.
+
+Uma boa solução deverá ficar próxima desse valor, embora o ótimo inteiro possa ser um pouco maior devido à indivisibilidade das tarefas.
+
+---
+
+# Exercício 4 — Motor de Decisioning SD-WAN Zero-Trust
+
+## Objetivo
+
+Neste exercício, o algoritmo realiza a seleção de uma rota entre:
+
+```text
+Origem  = 0
+Destino = 11
+```
+
+A decisão considera:
+
+* **12 roteadores**, numerados de `0` a `11`;
+* latência dos enlaces;
+* perda de pacotes;
+* reputação de segurança dos nós;
+* penalidade de `5000` caso algum nó da rota tenha reputação inferior a `50`;
+* pesos `w1` e `w2`;
+* amostragem estocástica;
+* `np.random.seed(2026)` para reprodutibilidade.
+
+---
+
+## Função de Fitness
+
+A função utilizada é:
+
+$$
+Fitness(X) =
+w_1 \times LatênciaTotal(X)
++
+w_2 \times PerdaPacotesTotal(X)
++
+PenalidadeSegurança(X)
+$$
+
+Neste código:
+
+```python
+W1 = 1.0
+W2 = 10.0
+
+PENALIDADE_SEGURANCA = 5000.0
+```
+
+A implementação é:
+
+```python
+fitness = (
+    W1 * latencia_total
+    + W2 * perda_total
+    + penalidade
+)
+```
+
+---
+
+## Código completo
+
+```python
+"""
+============================================================
+DESAFIO AC-1
+Motor de Decisioning SD-WAN Zero-Trust
+============================================================
+
+RELATÓRIO TÉCNICO
+
+O algoritmo realiza a seleção de uma rota entre o nó 0
+(origem) e o nó 11 (destino).
+
+O fitness considera:
+
+    Fitness(X) =
+        w1 * LatenciaTotal(X)
+        + w2 * PerdaPacotesTotal(X)
+        + PenalidadeSeguranca(X)
+
+A penalidade de segurança é de 5000 quando qualquer nó
+pertencente à rota apresenta reputação inferior a 50.
+
+Nós com reputação < 50 são considerados não confiáveis.
+
+A semente 2026 é utilizada para garantir
+reprodutibilidade da amostragem estocástica.
+
+Após a execução, o programa informa a rota selecionada,
+sua latência, perda de pacotes, reputações e fitness.
+============================================================
+"""
+
+import numpy as np
+
+
+# ==========================================================
+# CONFIGURAÇÃO
+# ==========================================================
+
+np.random.seed(2026)
+
+NUM_NOS = 12
+ORIGEM = 0
+DESTINO = 11
+
+W1 = 1.0
+W2 = 10.0
+
+PENALIDADE_SEGURANCA = 5000.0
+
+
+# ==========================================================
+# MATRIZES DE ATRIBUTOS
+# ==========================================================
+
+# Matriz de adjacência.
+# 1 = enlace disponível
+# 0 = enlace indisponível
+
+matriz_adjacencia = np.zeros(
+    (NUM_NOS, NUM_NOS),
+    dtype=int
+)
+
+for i in range(NUM_NOS):
+
+    for j in range(i + 1, NUM_NOS):
+
+        if np.random.rand() < 0.35:
+
+            matriz_adjacencia[i, j] = 1
+            matriz_adjacencia[j, i] = 1
+
+
+# Garante uma cadeia básica conectando todos os nós.
+
+for i in range(NUM_NOS - 1):
+
+    matriz_adjacencia[i, i + 1] = 1
+    matriz_adjacencia[i + 1, i] = 1
+
+
+# Latência dos enlaces
+matriz_latencia = np.random.uniform(
+    5,
+    100,
+    (NUM_NOS, NUM_NOS)
+)
+
+# Perda de pacotes
+matriz_perda = np.random.uniform(
+    0,
+    10,
+    (NUM_NOS, NUM_NOS)
+)
+
+
+# Torna as matrizes simétricas
+
+matriz_latencia = (
+    matriz_latencia
+    + matriz_latencia.T
+) / 2
+
+matriz_perda = (
+    matriz_perda
+    + matriz_perda.T
+) / 2
+
+
+# Reputação de segurança dos nós
+reputacao = np.random.uniform(
+    0,
+    100,
+    NUM_NOS
+)
+
+
+# ==========================================================
+# FUNÇÃO DE FITNESS
+# ==========================================================
+
+def calcular_fitness(rota):
+
+    latencia_total = 0.0
+    perda_total = 0.0
+
+    # Calcula métricas dos enlaces
+    for i in range(len(rota) - 1):
+
+        origem = rota[i]
+        destino = rota[i + 1]
+
+        latencia_total += (
+            matriz_latencia[origem, destino]
+        )
+
+        perda_total += (
+            matriz_perda[origem, destino]
+        )
+
+    # Verifica segurança dos nós
+    nos_inseguros = [
+        no
+        for no in rota
+        if reputacao[no] < 50
+    ]
+
+    penalidade = 0.0
+
+    if len(nos_inseguros) > 0:
+        penalidade = PENALIDADE_SEGURANCA
+
+    fitness = (
+        W1 * latencia_total
+        + W2 * perda_total
+        + penalidade
+    )
+
+    return (
+        fitness,
+        latencia_total,
+        perda_total,
+        penalidade,
+        nos_inseguros
+    )
+
+
+# ==========================================================
+# GERAÇÃO DE ROTAS
+# ==========================================================
+
+def gerar_rota():
+
+    rota = [ORIGEM]
+
+    atual = ORIGEM
+
+    visitados = {
+        ORIGEM
+    }
+
+    while atual != DESTINO:
+
+        vizinhos = [
+            no
+            for no in range(NUM_NOS)
+            if matriz_adjacencia[atual, no] == 1
+            and no not in visitados
+        ]
+
+        # Se não houver vizinho disponível,
+        # retorna None.
+        if len(vizinhos) == 0:
+            return None
+
+        # Dá preferência ao destino quando ele
+        # estiver diretamente conectado.
+        if DESTINO in vizinhos:
+            proximo = DESTINO
+
+        else:
+            proximo = np.random.choice(
+                vizinhos
+            )
+
+        rota.append(proximo)
+
+        visitados.add(proximo)
+
+        atual = proximo
+
+    return rota
+
+
+# ==========================================================
+# AMOSTRAGEM ESTOCÁSTICA
+# ==========================================================
+
+NUM_AMOSTRAS = 10000
+
+melhor_rota = None
+melhor_resultado = None
+
+for _ in range(NUM_AMOSTRAS):
+
+    rota = gerar_rota()
+
+    if rota is None:
+        continue
+
+    resultado = calcular_fitness(rota)
+
+    fitness = resultado[0]
+
+    if (
+        melhor_resultado is None
+        or fitness < melhor_resultado[0]
+    ):
+
+        melhor_rota = rota.copy()
+
+        melhor_resultado = resultado
+
+
+# ==========================================================
+# RESULTADO
+# ==========================================================
+
+if melhor_rota is None:
+
+    print(
+        "Não foi encontrada nenhuma rota "
+        "entre os nós 0 e 11."
+    )
+
+else:
+
+    (
+        fitness,
+        latencia_total,
+        perda_total,
+        penalidade,
+        nos_inseguros
+    ) = melhor_resultado
+
+    print("\n")
+    print("=" * 60)
+    print("RESULTADO DO MOTOR SD-WAN ZERO-TRUST")
+    print("=" * 60)
+
+    print(
+        f"Rota selecionada: "
+        f"{' -> '.join(map(str, melhor_rota))}"
+    )
+
+    print(
+        f"Latência total: "
+        f"{latencia_total:.2f} ms"
+    )
+
+    print(
+        f"Perda de pacotes total: "
+        f"{perda_total:.2f} %"
+    )
+
+    print(
+        f"Penalidade de segurança: "
+        f"{penalidade:.2f}"
+    )
+
+    print(
+        f"Fitness final: "
+        f"{fitness:.2f}"
+    )
+
+    print("\nReputação dos nós da rota:")
+
+    for no in melhor_rota:
+
+        status = (
+            "NÃO CONFIÁVEL"
+            if reputacao[no] < 50
+            else "CONFIÁVEL"
+        )
+
+        print(
+            f"Nó {no}: "
+            f"{reputacao[no]:.2f} "
+            f"-> {status}"
+        )
+
+    print("\nNós penalizados:")
+
+    if len(nos_inseguros) == 0:
+
+        print(
+            "Nenhum nó com reputação inferior a 50."
+        )
+
+    else:
+
+        print(nos_inseguros)
+
+    print("=" * 60)
+```
+
+---
+
+# Explicação do Exercício 4
+
+A função de fitness combina três componentes:
+
+| Componente | Descrição                                               |
+| ---------- | ------------------------------------------------------- |
+| Latência   | Tempo total dos enlaces da rota                         |
+| Perda      | Soma da perda de pacotes dos enlaces                    |
+| Segurança  | Penalização de `5000` para rotas com nós não confiáveis |
+
+A segurança é avaliada por:
+
+```python
+if reputacao[no] < 50:
+```
+
+Quando existe pelo menos um nó com reputação inferior a `50`, aplica-se:
+
+```python
+penalidade = 5000.0
+```
+
+---
+
+## Exemplo de decisão
+
+Considere duas possíveis rotas.
+
+### Rota A
+
+```text
+Latência = 80 ms
+Perda = 5%
+Reputação = 30
+```
+
+Como existe um nó não confiável:
+
+$$
+80 + (5 \times 10) + 5000
+$$
+
+Resultado:
+
+```text
+5130
+```
+
+### Rota B
+
+```text
+Latência = 110 ms
+Perda = 6%
+Todos os nós confiáveis
+```
+
+Nesse caso:
+
+$$
+110 + (6 \times 10)
+$$
+
+Resultado:
+
+```text
+170
+```
+
+Portanto:
+
+```text
+Rota B → Fitness = 170
+Rota A → Fitness = 5130
+```
+
+Mesmo sendo mais lenta, a **Rota B** é escolhida por apresentar maior segurança.
+
+---
+
+# Princípio Zero-Trust
+
+O resultado demonstra um princípio fundamental do modelo **Zero-Trust**:
+
+> Uma rota não deve ser considerada adequada apenas por apresentar o melhor desempenho de rede.
+
+A segurança também precisa fazer parte da decisão.
+
+Assim, o algoritmo pode aceitar uma pequena perda de desempenho para evitar um nó considerado não confiável.
+
+---
+
+# Observação sobre a execução
+
+O Exercício 4 utiliza geração estocástica para:
+
+* criar a topologia;
+* gerar latências;
+* gerar perdas de pacotes;
+* gerar reputações;
+* selecionar rotas.
+
+A utilização de:
+
+```python
+np.random.seed(2026)
+```
+
+permite tornar a execução **reprodutível**, desde que o código seja executado no mesmo ambiente e com a mesma sequência de operações aleatórias.
+
+A rota exata selecionada é apresentada automaticamente no resultado do programa.
+
+---
+
+# Resumo dos Exercícios
+
+| Exercício | Problema          | Objetivo principal                                   |
+| --------- | ----------------- | ---------------------------------------------------- |
+| 1         | Elitismo          | Avaliar estabilidade e preservação da melhor solução |
+| 2         | SLA               | Penalizar violações de latência                      |
+| 3         | Balanceamento     | Minimizar o Makespan dos servidores                  |
+| 4         | SD-WAN Zero-Trust | Otimizar desempenho considerando segurança           |
+
+---
+
+# Conclusão Geral
+
+Os quatro exercícios demonstram diferentes formas de incorporar requisitos operacionais em algoritmos de otimização.
+
+No **Exercício 1**, o elitismo aumenta a estabilidade ao preservar a melhor solução encontrada.
+
+No **Exercício 2**, as penalidades permitem representar requisitos de SLA diretamente na função de custo.
+
+No **Exercício 3**, o Makespan transforma o problema de distribuição de tarefas em uma função objetivo que busca equilibrar a carga entre os servidores.
+
+No **Exercício 4**, latência, perda de pacotes e segurança são combinadas em uma única função de fitness. A penalidade elevada para nós não confiáveis faz com que o algoritmo priorize rotas compatíveis com o princípio **Zero-Trust**, mesmo quando isso significa abrir mão de parte do desempenho.
+
+Dessa forma, os exercícios mostram como algoritmos de otimização podem ser adaptados para considerar não apenas desempenho, mas também **estabilidade, restrições operacionais, balanceamento de recursos e requisitos de segurança**.
