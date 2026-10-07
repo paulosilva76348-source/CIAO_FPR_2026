@@ -16,3 +16,11 @@ Successfully installed scikit-fuzzy-0.5.0
 <img width="606" height="450" alt="image" src="https://github.com/user-attachments/assets/af188b83-2cba-4667-bbbb-bde610d5e2cf" />
 
 =====Lab2=====
+
+Nota do serviço (0-10) [7]: 4
+Nota da comida (0-10) [3]: 6
+
+=> Gorjeta sugerida: 12.6%
+
+<img width="320" height="422" alt="image" src="https://github.com/user-attachments/assets/60c6b496-ddd4-482c-bac4-6d2c8da8d620" />
+<img width="323" height="227" alt="image" src="https://github.com/user-attachments/assets/60804115-bda0-4e3f-abf7-ffc84c679806" />
